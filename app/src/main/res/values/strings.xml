@@ -1,3 +1,16 @@
 <resources>
     <string name="app_name">PennyWise</string>
+    <string name="onboarding_logo_mark">PW</string>
+    <string name="onboarding_tagline">Your personal money monitoring companion</string>
+    <string name="onboarding_permission_note">Later screens can request SMS, email and notification permissions with full user consent.</string>
+    <string name="onboarding_get_started">Get Started</string>
+    <string name="onboarding_page_badge_tracking">Smart Tracking</string>
+    <string name="onboarding_page_title_tracking">Track expenses from SMS and email alerts</string>
+    <string name="onboarding_page_description_tracking">PennyWise is designed to turn transaction messages and email receipts into one simple expense timeline.</string>
+    <string name="onboarding_page_badge_insights">Meaningful Insights</string>
+    <string name="onboarding_page_title_insights">See daily, weekly, monthly and yearly spend</string>
+    <string name="onboarding_page_description_insights">Clear summaries and graphs help you understand how money moves over time without manually entering each expense.</string>
+    <string name="onboarding_page_badge_categories">Category Focus</string>
+    <string name="onboarding_page_title_categories">Know where your money is going</string>
+    <string name="onboarding_page_description_categories">We will group transactions into categories so you can spot patterns like food, travel, bills and shopping faster.</string>
 </resources>

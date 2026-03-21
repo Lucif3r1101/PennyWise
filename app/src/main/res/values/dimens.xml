@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="space_screen_horizontal">24dp</dimen>
+    <dimen name="space_screen_vertical">28dp</dimen>
+    <dimen name="space_xs">8dp</dimen>
+    <dimen name="space_sm">12dp</dimen>
+    <dimen name="space_md">20dp</dimen>
+    <dimen name="space_lg">24dp</dimen>
+    <dimen name="space_xl">28dp</dimen>
+    <dimen name="space_2xl">32dp</dimen>
+    <dimen name="card_corner_large">32dp</dimen>
+    <dimen name="card_corner_medium">20dp</dimen>
+    <dimen name="hero_corner">40dp</dimen>
+    <dimen name="logo_size">92dp</dimen>
+    <dimen name="hero_size">160dp</dimen>
+    <dimen name="indicator_height">10dp</dimen>
+    <dimen name="indicator_width_selected">30dp</dimen>
+    <dimen name="indicator_width_unselected">10dp</dimen>
+    <dimen name="indicator_spacing">5dp</dimen>
+    <dimen name="button_height">56dp</dimen>
+
+    <dimen name="text_logo">22sp</dimen>
+    <dimen name="text_title">28sp</dimen>
+    <dimen name="text_heading">24sp</dimen>
+    <dimen name="text_body">16sp</dimen>
+    <dimen name="text_caption">14sp</dimen>
+    <dimen name="text_progress">34sp</dimen>
+    <dimen name="text_badge">14sp</dimen>
+</resources>
