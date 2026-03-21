@@ -18,12 +18,22 @@
     <dimen name="indicator_width_unselected">10dp</dimen>
     <dimen name="indicator_spacing">5dp</dimen>
     <dimen name="button_height">56dp</dimen>
+    <dimen name="button_height_large">64dp</dimen>
+    <dimen name="progress_height">12dp</dimen>
+    <dimen name="progress_corner">10dp</dimen>
+    <dimen name="permission_icon_size">48dp</dimen>
+    <dimen name="stroke_width">1dp</dimen>
+    <dimen name="hero_orb_size">88dp</dimen>
+    <dimen name="sheet_handle_width">52dp</dimen>
+    <dimen name="sheet_handle_height">5dp</dimen>
 
     <dimen name="text_logo">22sp</dimen>
     <dimen name="text_title">28sp</dimen>
     <dimen name="text_heading">24sp</dimen>
+    <dimen name="text_heading_small">20sp</dimen>
     <dimen name="text_body">16sp</dimen>
     <dimen name="text_caption">14sp</dimen>
+    <dimen name="text_micro">12sp</dimen>
     <dimen name="text_progress">34sp</dimen>
     <dimen name="text_badge">14sp</dimen>
 </resources>

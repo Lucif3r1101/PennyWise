@@ -1,6 +1,8 @@
 package com.rishav.pennywise.feature.onboarding.presentation
 
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -16,37 +18,38 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.rishav.pennywise.R
 import com.rishav.pennywise.core.ui.textUnitResource
 import com.rishav.pennywise.ui.theme.PennyWiseTheme
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 
 @Composable
 fun OnboardingRoute(
     modifier: Modifier = Modifier,
+    onGetStartedClick: () -> Unit,
     viewModel: OnboardingViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -54,7 +57,7 @@ fun OnboardingRoute(
     OnboardingScreen(
         uiState = uiState,
         modifier = modifier,
-        onGetStartedClick = {}
+        onGetStartedClick = onGetStartedClick
     )
 }
 
@@ -64,199 +67,238 @@ fun OnboardingScreen(
     onGetStartedClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val pagerState = rememberPagerState(pageCount = { uiState.pages.size })
-    val coroutineScope = rememberCoroutineScope()
-    val settledPage = pagerState.settledPage
-    val isLastPage = settledPage == uiState.pages.lastIndex
+    var currentPage by remember { mutableIntStateOf(0) }
+    val isLastPage = currentPage == uiState.pages.lastIndex
 
-    LaunchedEffect(uiState.pages.size, settledPage) {
+    LaunchedEffect(currentPage, uiState.pages.size) {
         if (uiState.pages.isEmpty() || isLastPage) return@LaunchedEffect
-        delay(3500)
-        if (!pagerState.isScrollInProgress) {
-            pagerState.animateScrollToPage(settledPage + 1)
-        }
+        delay(4200)
+        currentPage = (currentPage + 1).coerceAtMost(uiState.pages.lastIndex)
     }
 
     Surface(
         modifier = modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background
     ) {
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(
-                    horizontal = dimensionResource(id = R.dimen.space_screen_horizontal),
-                    vertical = dimensionResource(id = R.dimen.space_screen_vertical)
-                ),
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(dimensionResource(id = R.dimen.logo_size))
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = stringResource(id = R.string.onboarding_logo_mark),
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = textUnitResource(id = R.dimen.text_logo)
+                .background(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.primaryContainer,
+                            MaterialTheme.colorScheme.background,
+                            MaterialTheme.colorScheme.background
+                        )
                     )
-                }
-                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_sm)))
-                Text(
-                    text = stringResource(id = R.string.app_name),
-                    fontSize = textUnitResource(id = R.dimen.text_title),
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
                 )
-                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_xs)))
-                Text(
-                    text = stringResource(id = R.string.onboarding_tagline),
-                    fontSize = textUnitResource(id = R.dimen.text_body),
-                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f)
-                )
-            }
+        ) {
+            Text(
+                text = stringResource(id = R.string.onboarding_skip),
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(dimensionResource(id = R.dimen.space_md))
+                    .clickable(onClick = onGetStartedClick)
+            )
 
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(dimensionResource(id = R.dimen.card_corner_large)),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                ),
-                elevation = CardDefaults.cardElevation(
-                    defaultElevation = dimensionResource(id = R.dimen.space_xs)
-                )
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = dimensionResource(id = R.dimen.space_screen_horizontal)),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
             ) {
-                HorizontalPager(
-                    state = pagerState,
-                    modifier = Modifier.fillMaxWidth()
+                Crossfade(
+                    targetState = currentPage,
+                    animationSpec = tween(durationMillis = 350),
+                    label = "onboarding_page"
                 ) { page ->
-                    val onboardingPage = uiState.pages[page]
+                    val pageModel = uiState.pages[page]
+                    val chips = onboardingChipTexts(page)
 
                     Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(dimensionResource(id = R.dimen.space_lg)),
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(dimensionResource(id = R.dimen.card_corner_medium)))
-                                .background(MaterialTheme.colorScheme.primaryContainer)
-                                .padding(
-                                    horizontal = dimensionResource(id = R.dimen.space_lg),
-                                    vertical = dimensionResource(id = R.dimen.space_sm)
-                                )
-                        ) {
-                            Text(
-                                text = stringResource(id = onboardingPage.badgeRes),
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = textUnitResource(id = R.dimen.text_badge)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_xl)))
-
-                        Box(
-                            modifier = Modifier
-                                .size(dimensionResource(id = R.dimen.hero_size))
-                                .clip(RoundedCornerShape(dimensionResource(id = R.dimen.hero_corner)))
-                                .background(MaterialTheme.colorScheme.secondaryContainer),
+                                .size(120.dp)
+                                .clip(RoundedCornerShape(32.dp))
+                                .background(
+                                    brush = Brush.linearGradient(
+                                        colors = listOf(
+                                            MaterialTheme.colorScheme.primary,
+                                            MaterialTheme.colorScheme.secondary
+                                        )
+                                    )
+                                ),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = "${page + 1}/${uiState.pages.size}",
-                                color = MaterialTheme.colorScheme.primary,
+                                text = stringResource(id = R.string.onboarding_logo_mark),
+                                color = MaterialTheme.colorScheme.onPrimary,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = textUnitResource(id = R.dimen.text_progress)
+                                fontSize = textUnitResource(id = R.dimen.text_title)
                             )
                         }
 
                         Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_xl)))
 
                         Text(
-                            text = stringResource(id = onboardingPage.titleRes),
-                            textAlign = TextAlign.Center,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontSize = textUnitResource(id = R.dimen.text_heading)
+                            text = stringResource(id = pageModel.badgeRes),
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = textUnitResource(id = R.dimen.text_caption)
                         )
 
                         Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_sm)))
 
                         Text(
-                            text = stringResource(id = onboardingPage.descriptionRes),
+                            text = stringResource(id = pageModel.titleRes),
                             textAlign = TextAlign.Center,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = textUnitResource(id = R.dimen.text_title)
+                        )
+
+                        Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_sm)))
+
+                        Text(
+                            text = stringResource(id = pageModel.descriptionRes),
+                            textAlign = TextAlign.Center,
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.72f),
                             fontSize = textUnitResource(id = R.dimen.text_body)
                         )
-                    }
-                }
-            }
 
-            Column {
-                Text(
-                    text = stringResource(id = R.string.onboarding_permission_note),
-                    fontSize = textUnitResource(id = R.dimen.text_caption),
-                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.65f),
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_md)))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    uiState.pages.forEachIndexed { index, _ ->
-                        val selected = index == settledPage
-                        Box(
-                            modifier = Modifier
-                                .padding(horizontal = dimensionResource(id = R.dimen.indicator_spacing))
-                                .clip(CircleShape)
-                                .background(
-                                    if (selected) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.outlineVariant
-                                )
-                                .clickable {
-                                    if (index != settledPage) {
-                                        coroutineScope.launch {
-                                            pagerState.animateScrollToPage(index)
+                        Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_xl)))
+
+                        chips.chunked(2).forEach { rowChips ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(dimensionResource(id = R.dimen.space_sm))
+                            ) {
+                                rowChips.forEach { chip ->
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(dimensionResource(id = R.dimen.card_corner_medium)))
+                                            .background(MaterialTheme.colorScheme.surface)
+                                            .padding(
+                                                horizontal = dimensionResource(id = R.dimen.space_sm),
+                                                vertical = dimensionResource(id = R.dimen.space_sm)
+                                            )
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(dimensionResource(id = R.dimen.space_xs))
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(8.dp)
+                                                    .clip(CircleShape)
+                                                    .background(MaterialTheme.colorScheme.primary)
+                                            )
+                                            Text(
+                                                text = chip,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                fontSize = textUnitResource(id = R.dimen.text_caption),
+                                                fontWeight = FontWeight.Medium
+                                            )
                                         }
                                     }
                                 }
+                                if (rowChips.size == 1) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_sm)))
+                        }
+                    }
+                }
+            }
+
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = dimensionResource(id = R.dimen.space_screen_horizontal))
+                    .padding(bottom = dimensionResource(id = R.dimen.space_screen_vertical)),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(dimensionResource(id = R.dimen.space_xs))
+                ) {
+                    uiState.pages.forEachIndexed { index, _ ->
+                        val width by animateFloatAsState(
+                            targetValue = if (index == currentPage) 32f else 8f,
+                            animationSpec = tween(durationMillis = 250),
+                            label = "indicator_width"
+                        )
+                        Box(
+                            modifier = Modifier
+                                .width(width.dp)
                                 .height(dimensionResource(id = R.dimen.indicator_height))
-                                .width(
-                                    if (selected) {
-                                        dimensionResource(id = R.dimen.indicator_width_selected)
-                                    } else {
-                                        dimensionResource(id = R.dimen.indicator_width_unselected)
-                                    }
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(
+                                    if (index == currentPage) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.outlineVariant
                                 )
+                                .clickable { currentPage = index }
                         )
                     }
                 }
 
-                AnimatedVisibility(visible = isLastPage) {
-                    Button(
-                        onClick = onGetStartedClick,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = dimensionResource(id = R.dimen.space_md))
-                            .height(dimensionResource(id = R.dimen.button_height))
-                    ) {
-                        Text(text = stringResource(id = R.string.onboarding_get_started))
-                    }
+                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_lg)))
+
+                Button(
+                    onClick = {
+                        if (isLastPage) {
+                            onGetStartedClick()
+                        } else {
+                            currentPage = (currentPage + 1).coerceAtMost(uiState.pages.lastIndex)
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(dimensionResource(id = R.dimen.button_height)),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text(
+                        text = if (isLastPage) {
+                            stringResource(id = R.string.onboarding_get_started)
+                        } else {
+                            stringResource(id = R.string.onboarding_continue)
+                        },
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun onboardingChipTexts(page: Int): List<String> {
+    return when (page) {
+        0 -> listOf(
+            stringResource(id = R.string.onboarding_tracking_chip_one),
+            stringResource(id = R.string.onboarding_tracking_chip_two)
+        )
+        1 -> listOf(
+            stringResource(id = R.string.onboarding_insight_chip_one),
+            stringResource(id = R.string.onboarding_insight_chip_two),
+            stringResource(id = R.string.onboarding_insight_chip_three),
+            stringResource(id = R.string.onboarding_tracking_chip_three)
+        )
+        else -> listOf(
+            stringResource(id = R.string.onboarding_category_chip_one),
+            stringResource(id = R.string.onboarding_category_chip_two),
+            stringResource(id = R.string.onboarding_category_chip_three),
+            stringResource(id = R.string.onboarding_category_chip_four)
+        )
     }
 }
 

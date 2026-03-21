@@ -1,7 +1,18 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
 }
+
+val localProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.inputStream().use(::load)
+    }
+}
+
+fun localProperty(name: String): String = localProperties.getProperty(name, "").trim()
 
 android {
     namespace = "com.rishav.pennywise"
@@ -19,6 +30,16 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("boolean", "GMAIL_CONFIGURED", localProperty("GMAIL_CLIENT_ID").isNotBlank().toString())
+        buildConfigField("boolean", "OUTLOOK_CONFIGURED", localProperty("OUTLOOK_CLIENT_ID").isNotBlank().toString())
+        buildConfigField("String", "GMAIL_CLIENT_ID", "\"${localProperty("GMAIL_CLIENT_ID")}\"")
+        buildConfigField("String", "GMAIL_REDIRECT_SCHEME", "\"${localProperty("GMAIL_REDIRECT_SCHEME")}\"")
+        buildConfigField("String", "GMAIL_REDIRECT_HOST", "\"${localProperty("GMAIL_REDIRECT_HOST")}\"")
+        buildConfigField("String", "OUTLOOK_CLIENT_ID", "\"${localProperty("OUTLOOK_CLIENT_ID")}\"")
+        buildConfigField("String", "OUTLOOK_TENANT_ID", "\"${localProperty("OUTLOOK_TENANT_ID")}\"")
+        buildConfigField("String", "OUTLOOK_REDIRECT_SCHEME", "\"${localProperty("OUTLOOK_REDIRECT_SCHEME")}\"")
+        buildConfigField("String", "OUTLOOK_REDIRECT_HOST", "\"${localProperty("OUTLOOK_REDIRECT_HOST")}\"")
+        manifestPlaceholders["appAuthRedirectScheme"] = localProperty("GMAIL_REDIRECT_SCHEME").ifBlank { "com.rishav.pennywise" }
     }
 
     buildTypes {
@@ -36,6 +57,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -44,7 +66,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
+    implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.androidx.activity.compose)
+    implementation(libs.appauth)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
