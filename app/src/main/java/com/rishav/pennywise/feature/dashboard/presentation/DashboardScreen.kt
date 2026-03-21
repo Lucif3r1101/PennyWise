@@ -7,12 +7,15 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,7 +29,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -36,30 +41,40 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.dimensionResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import com.rishav.pennywise.core.auth.AuthRedirectRelay
-import com.rishav.pennywise.core.auth.EmailAuthManager
-import com.rishav.pennywise.core.sms.SmsTransactionReader
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.rishav.pennywise.R
+import com.rishav.pennywise.core.auth.AuthRedirectRelay
+import com.rishav.pennywise.core.auth.EmailAuthManager
+import com.rishav.pennywise.core.sms.SmsTransactionReader
 import com.rishav.pennywise.core.ui.textUnitResource
+import kotlin.math.abs
 
 @Composable
 fun DashboardRoute(
@@ -116,6 +131,7 @@ fun DashboardRoute(
         modifier = modifier,
         onTabSelected = viewModel::onTabSelected,
         onTrackingStartOptionSelected = viewModel::onTrackingStartOptionSelected,
+        onChartPointSelected = viewModel::onChartPointSelected,
         onAllowAllClick = viewModel::onAllowAllClick,
         onSourceSelected = viewModel::onSourceSelected,
         onDismissSetupSheet = viewModel::onDismissSetupSheet,
@@ -158,7 +174,10 @@ fun DashboardRoute(
             } else {
                 smsPermissionLauncher.launch(Manifest.permission.READ_SMS)
             }
-        }
+        },
+        onBudgetDraftCategoryChanged = viewModel::onBudgetDraftCategoryChanged,
+        onBudgetDraftAmountChanged = viewModel::onBudgetDraftAmountChanged,
+        onCreateBudget = viewModel::onCreateBudget
     )
 }
 
@@ -167,12 +186,16 @@ fun DashboardScreen(
     uiState: DashboardUiState,
     onTabSelected: (DashboardTab) -> Unit,
     onTrackingStartOptionSelected: (TrackingStartOption) -> Unit,
+    onChartPointSelected: (Int) -> Unit,
     onAllowAllClick: () -> Unit,
     onSourceSelected: (SourceType) -> Unit,
     onDismissSetupSheet: () -> Unit,
     onSetupPrimaryClick: () -> Unit,
     onGiveLaterClick: () -> Unit,
     onRefreshReading: () -> Unit,
+    onBudgetDraftCategoryChanged: (String) -> Unit,
+    onBudgetDraftAmountChanged: (String) -> Unit,
+    onCreateBudget: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Scaffold(
@@ -220,6 +243,7 @@ fun DashboardScreen(
                 DashboardTab.HOME -> HomeTabContent(
                     uiState = uiState,
                     onTrackingStartOptionSelected = onTrackingStartOptionSelected,
+                    onChartPointSelected = onChartPointSelected,
                     onAllowAllClick = onAllowAllClick,
                     onSourceSelected = onSourceSelected,
                     onRefreshReading = onRefreshReading
@@ -230,9 +254,11 @@ fun DashboardScreen(
                     description = stringResource(id = R.string.ai_insights_placeholder)
                 )
 
-                DashboardTab.CATEGORIES -> PlaceholderTab(
-                    title = stringResource(id = R.string.categories_title),
-                    description = stringResource(id = R.string.categories_placeholder)
+                DashboardTab.CATEGORIES -> CategoriesTabContent(
+                    uiState = uiState,
+                    onBudgetDraftCategoryChanged = onBudgetDraftCategoryChanged,
+                    onBudgetDraftAmountChanged = onBudgetDraftAmountChanged,
+                    onCreateBudget = onCreateBudget
                 )
             }
         }
@@ -252,6 +278,7 @@ fun DashboardScreen(
 private fun HomeTabContent(
     uiState: DashboardUiState,
     onTrackingStartOptionSelected: (TrackingStartOption) -> Unit,
+    onChartPointSelected: (Int) -> Unit,
     onAllowAllClick: () -> Unit,
     onSourceSelected: (SourceType) -> Unit,
     onRefreshReading: () -> Unit
@@ -261,48 +288,35 @@ private fun HomeTabContent(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .statusBarsPadding()
-            .padding(horizontal = dimensionResource(id = R.dimen.space_screen_horizontal)),
+            .background(MaterialTheme.colorScheme.background),
+        contentPadding = PaddingValues(bottom = 96.dp),
         verticalArrangement = Arrangement.spacedBy(dimensionResource(id = R.dimen.space_lg))
     ) {
         item {
-            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_sm)))
-            Text(
-                text = stringResource(id = R.string.home_welcome_title),
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Bold,
-                fontSize = textUnitResource(id = R.dimen.text_title)
-            )
-            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_xs)))
-            Text(
-                text = stringResource(id = R.string.home_welcome_subtitle),
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.72f),
-                fontSize = textUnitResource(id = R.dimen.text_body)
+            HomeHeader(
+                totalExpense = uiState.totalExpense,
+                budget = uiState.budgetTarget,
+                latestTransaction = uiState.latestTransaction,
+                onAllowAllClick = onAllowAllClick
             )
         }
 
         item {
-            HeroCard(
+            PermissionBannerCard(
+                modifier = Modifier.padding(horizontal = dimensionResource(id = R.dimen.space_screen_horizontal)),
                 connectedCount = uiState.connectedCount,
                 availableCount = uiState.availableCount,
-                progress = progress,
-                canRefresh = uiState.canRefresh,
-                isRefreshing = uiState.isRefreshing,
                 onAllowAllClick = onAllowAllClick,
-                onRefreshReading = onRefreshReading
+                onRefreshReading = onRefreshReading,
+                isRefreshing = uiState.isRefreshing
             )
         }
 
         item {
-            SectionHeading(
-                eyebrow = stringResource(id = R.string.home_permission_title),
-                title = stringResource(id = R.string.home_setup_title),
-                description = stringResource(id = R.string.home_permission_description)
-            )
-        }
-
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(dimensionResource(id = R.dimen.space_sm))) {
+            Column(
+                modifier = Modifier.padding(horizontal = dimensionResource(id = R.dimen.space_screen_horizontal)),
+                verticalArrangement = Arrangement.spacedBy(dimensionResource(id = R.dimen.space_sm))
+            ) {
                 uiState.sourceItems.forEach { item ->
                     SourceCard(item = item, onClick = { onSourceSelected(item.type) })
                 }
@@ -310,39 +324,36 @@ private fun HomeTabContent(
         }
 
         item {
-            Card(
-                shape = RoundedCornerShape(dimensionResource(id = R.dimen.card_corner_large)),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(dimensionResource(id = R.dimen.space_lg))
-                ) {
-                    SectionHeading(
-                        eyebrow = stringResource(id = R.string.home_range_title),
-                        title = stringResource(id = R.string.home_range_title),
-                        description = stringResource(id = R.string.home_range_description)
-                    )
-                    Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_md)))
-                    Row(horizontalArrangement = Arrangement.spacedBy(dimensionResource(id = R.dimen.space_sm))) {
-                        TrackingOptionChip(
-                            text = stringResource(id = R.string.home_range_now),
-                            selected = uiState.trackingStartOption == TrackingStartOption.FROM_NOW,
-                            onClick = { onTrackingStartOptionSelected(TrackingStartOption.FROM_NOW) }
-                        )
-                        TrackingOptionChip(
-                            text = stringResource(id = R.string.home_range_year),
-                            selected = uiState.trackingStartOption == TrackingStartOption.FROM_THIS_YEAR,
-                            onClick = { onTrackingStartOptionSelected(TrackingStartOption.FROM_THIS_YEAR) }
-                        )
-                    }
-                }
-            }
+            SpendingOverviewCard(
+                modifier = Modifier.padding(horizontal = dimensionResource(id = R.dimen.space_screen_horizontal)),
+                selectedOption = uiState.trackingStartOption,
+                periodData = uiState.chartPoints,
+                selectedChartPointIndex = uiState.selectedChartPointIndex,
+                totalExpense = uiState.totalExpense,
+                selectedPoint = uiState.selectedChartPoint,
+                onTrackingStartOptionSelected = onTrackingStartOptionSelected,
+                onChartPointSelected = onChartPointSelected
+            )
+        }
+
+        item {
+            BudgetSummaryCard(
+                modifier = Modifier.padding(horizontal = dimensionResource(id = R.dimen.space_screen_horizontal)),
+                budgets = uiState.budgets
+            )
+        }
+
+        item {
+            RecentTransactionsCard(
+                modifier = Modifier.padding(horizontal = dimensionResource(id = R.dimen.space_screen_horizontal)),
+                latestTransaction = uiState.latestTransaction,
+                recentTransactions = uiState.recentTransactions
+            )
         }
 
         item {
             ReadingCard(
+                modifier = Modifier.padding(horizontal = dimensionResource(id = R.dimen.space_screen_horizontal)),
                 progress = progress,
                 status = uiState.readingStatus,
                 hint = uiState.readingHint,
@@ -352,124 +363,729 @@ private fun HomeTabContent(
                 onRefreshReading = onRefreshReading
             )
         }
+    }
+}
+
+@Composable
+private fun CategoriesTabContent(
+    uiState: DashboardUiState,
+    onBudgetDraftCategoryChanged: (String) -> Unit,
+    onBudgetDraftAmountChanged: (String) -> Unit,
+    onCreateBudget: () -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            horizontal = dimensionResource(id = R.dimen.space_screen_horizontal),
+            vertical = dimensionResource(id = R.dimen.space_screen_vertical)
+        ),
+        verticalArrangement = Arrangement.spacedBy(dimensionResource(id = R.dimen.space_lg))
+    ) {
+        item {
+            SectionHeading(
+                eyebrow = stringResource(id = R.string.categories_title),
+                title = stringResource(id = R.string.categories_header_title),
+                description = stringResource(id = R.string.categories_header_description)
+            )
+        }
 
         item {
-            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_lg)))
+            CategoryBreakdownCard(categories = uiState.categoryBreakdown)
+        }
+
+        item {
+            BudgetPlannerCard(
+                budgets = uiState.budgets,
+                selectedCategory = uiState.budgetDraftCategory,
+                amount = uiState.budgetDraftAmount,
+                onCategorySelected = onBudgetDraftCategoryChanged,
+                onAmountChanged = onBudgetDraftAmountChanged,
+                onCreateBudget = onCreateBudget
+            )
         }
     }
 }
 
 @Composable
-private fun HeroCard(
+private fun HomeHeader(
+    totalExpense: Int,
+    budget: Int,
+    latestTransaction: RecentTransactionUiModel?,
+    onAllowAllClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(bottomStart = 36.dp, bottomEnd = 36.dp))
+            .background(
+                Brush.horizontalGradient(
+                    colors = listOf(
+                        MaterialTheme.colorScheme.primary,
+                        MaterialTheme.colorScheme.secondary
+                    )
+                )
+            )
+            .statusBarsPadding()
+            .padding(dimensionResource(id = R.dimen.space_lg))
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(id = R.string.app_name),
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = textUnitResource(id = R.dimen.text_heading)
+                )
+                Text(
+                    text = stringResource(id = R.string.home_welcome_subtitle),
+                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.84f),
+                    fontSize = textUnitResource(id = R.dimen.text_caption)
+                )
+            }
+            TextButton(onClick = onAllowAllClick) {
+                Text(
+                    text = stringResource(id = R.string.home_open_setup),
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_lg)))
+
+        Card(
+            shape = RoundedCornerShape(dimensionResource(id = R.dimen.card_corner_large)),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(modifier = Modifier.padding(dimensionResource(id = R.dimen.space_lg))) {
+                Text(
+                    text = stringResource(id = R.string.home_total_expense_title),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = textUnitResource(id = R.dimen.text_caption)
+                )
+                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_xs)))
+                Text(
+                    text = "Rs ${formatIndianCurrency(totalExpense)}",
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = textUnitResource(id = R.dimen.text_title)
+                )
+                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_sm)))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    MetricLabel(
+                        title = stringResource(id = R.string.home_budget_target_title),
+                        value = "Rs ${formatIndianCurrency(budget)}"
+                    )
+                    MetricLabel(
+                        title = stringResource(id = R.string.home_latest_transaction_title),
+                        value = latestTransaction?.let { "Rs ${formatIndianCurrency(it.amount)}" }
+                            ?: stringResource(id = R.string.home_no_transactions_short)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PermissionBannerCard(
+    modifier: Modifier = Modifier,
     connectedCount: Int,
     availableCount: Int,
-    progress: Float,
-    canRefresh: Boolean,
-    isRefreshing: Boolean,
     onAllowAllClick: () -> Unit,
-    onRefreshReading: () -> Unit
+    onRefreshReading: () -> Unit,
+    isRefreshing: Boolean
 ) {
     Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(dimensionResource(id = R.dimen.card_corner_large)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+    ) {
+        Column(modifier = Modifier.padding(dimensionResource(id = R.dimen.space_lg))) {
+            Text(
+                text = stringResource(id = R.string.home_setup_eyebrow),
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = textUnitResource(id = R.dimen.text_micro)
+            )
+            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_xs)))
+            Text(
+                text = stringResource(id = R.string.home_setup_title),
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.Bold,
+                fontSize = textUnitResource(id = R.dimen.text_heading_small)
+            )
+            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_xs)))
+            Text(
+                text = stringResource(id = R.string.home_setup_description),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = textUnitResource(id = R.dimen.text_body)
+            )
+            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_md)))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                MetricLabel(
+                    title = stringResource(id = R.string.home_reading_sources),
+                    value = "$connectedCount/$availableCount"
+                )
+                MetricLabel(
+                    title = stringResource(id = R.string.home_progress_title),
+                    value = if (isRefreshing) {
+                        stringResource(id = R.string.home_refreshing)
+                    } else {
+                        stringResource(id = R.string.home_progress_ready)
+                    }
+                )
+            }
+            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_md)))
+            Row(horizontalArrangement = Arrangement.spacedBy(dimensionResource(id = R.dimen.space_sm))) {
+                Button(
+                    onClick = onAllowAllClick,
+                    shape = RoundedCornerShape(dimensionResource(id = R.dimen.card_corner_medium)),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text(text = stringResource(id = R.string.home_allow_all))
+                }
+                OutlinedButton(onClick = onRefreshReading) {
+                    Text(text = stringResource(id = R.string.home_refresh))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SpendingOverviewCard(
+    modifier: Modifier = Modifier,
+    selectedOption: TrackingStartOption,
+    periodData: List<ChartPointUiModel>,
+    selectedChartPointIndex: Int,
+    totalExpense: Int,
+    selectedPoint: ChartPointUiModel?,
+    onTrackingStartOptionSelected: (TrackingStartOption) -> Unit,
+    onChartPointSelected: (Int) -> Unit
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(dimensionResource(id = R.dimen.card_corner_large)),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
+        Column(modifier = Modifier.padding(dimensionResource(id = R.dimen.space_lg))) {
+            SectionHeading(
+                eyebrow = stringResource(id = R.string.home_chart_eyebrow),
+                title = stringResource(id = R.string.home_chart_title),
+                description = stringResource(id = R.string.home_chart_description)
+            )
+            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_md)))
+            Row(horizontalArrangement = Arrangement.spacedBy(dimensionResource(id = R.dimen.space_sm))) {
+                TrackingOptionChip(
+                    text = stringResource(id = R.string.home_range_week),
+                    selected = selectedOption == TrackingStartOption.WEEKLY,
+                    onClick = { onTrackingStartOptionSelected(TrackingStartOption.WEEKLY) }
+                )
+                TrackingOptionChip(
+                    text = stringResource(id = R.string.home_range_month),
+                    selected = selectedOption == TrackingStartOption.MONTHLY,
+                    onClick = { onTrackingStartOptionSelected(TrackingStartOption.MONTHLY) }
+                )
+                TrackingOptionChip(
+                    text = stringResource(id = R.string.home_range_year),
+                    selected = selectedOption == TrackingStartOption.YEARLY,
+                    onClick = { onTrackingStartOptionSelected(TrackingStartOption.YEARLY) }
+                )
+            }
+            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_lg)))
+            LineExpenseChart(
+                points = periodData,
+                selectedIndex = selectedChartPointIndex,
+                onPointSelected = onChartPointSelected
+            )
+            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_md)))
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                shape = RoundedCornerShape(dimensionResource(id = R.dimen.card_corner_medium))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(dimensionResource(id = R.dimen.space_md)),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = selectedPoint?.label ?: stringResource(id = R.string.home_chart_title),
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = textUnitResource(id = R.dimen.text_micro)
+                        )
+                        Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_xs)))
+                        Text(
+                            text = "Rs ${formatIndianCurrency(selectedPoint?.amount ?: 0)}",
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = textUnitResource(id = R.dimen.text_heading_small)
+                        )
+                    }
+                    Text(
+                        text = "Total Rs ${formatIndianCurrency(totalExpense)}",
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = textUnitResource(id = R.dimen.text_caption)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LineExpenseChart(
+    points: List<ChartPointUiModel>,
+    selectedIndex: Int,
+    onPointSelected: (Int) -> Unit
+) {
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val primaryLineColor = primaryColor.copy(alpha = 0.16f)
+    val primaryFillStart = primaryColor.copy(alpha = 0.22f)
+    val primaryFillEnd = primaryColor.copy(alpha = 0.02f)
+    val selectedMarkerColor = MaterialTheme.colorScheme.secondary
+    val unselectedMarkerColor = MaterialTheme.colorScheme.surface
+
+    Column {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            MaterialTheme.colorScheme.primaryContainer,
-                            MaterialTheme.colorScheme.surface
+                .height(220.dp)
+                .pointerInput(points) {
+                    detectTapGestures { offset ->
+                        if (points.isEmpty()) return@detectTapGestures
+                        val width = size.width.toFloat().coerceAtLeast(1f)
+                        val spacing = if (points.size == 1) 0f else width / points.lastIndex.coerceAtLeast(1)
+                        val tappedIndex = points.indices.minByOrNull { index ->
+                            abs(offset.x - (spacing * index))
+                        } ?: 0
+                        onPointSelected(tappedIndex)
+                    }
+                }
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                if (points.isEmpty()) return@Canvas
+
+                val chartHeight = size.height - 28.dp.toPx()
+                val stepX = if (points.size == 1) 0f else size.width / points.lastIndex.coerceAtLeast(1)
+                val plotted = points.mapIndexed { index, point ->
+                    Offset(
+                        x = stepX * index,
+                        y = chartHeight - (point.value.coerceIn(0f, 1f) * (chartHeight - 24.dp.toPx())) - 8.dp.toPx()
+                    )
+                }
+
+                drawLine(
+                    color = primaryLineColor,
+                    start = Offset(0f, chartHeight),
+                    end = Offset(size.width, chartHeight),
+                    strokeWidth = 2.dp.toPx()
+                )
+
+                val fillPath = Path().apply {
+                    moveTo(plotted.first().x, chartHeight)
+                    lineTo(plotted.first().x, plotted.first().y)
+                    for (index in 0 until plotted.lastIndex) {
+                        val current = plotted[index]
+                        val next = plotted[index + 1]
+                        val controlX = (current.x + next.x) / 2f
+                        cubicTo(controlX, current.y, controlX, next.y, next.x, next.y)
+                    }
+                    lineTo(plotted.last().x, chartHeight)
+                    close()
+                }
+
+                drawPath(
+                    path = fillPath,
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            primaryFillStart,
+                            primaryFillEnd
                         )
                     )
                 )
-                .padding(dimensionResource(id = R.dimen.space_lg))
+
+                val linePath = Path().apply {
+                    moveTo(plotted.first().x, plotted.first().y)
+                    for (index in 0 until plotted.lastIndex) {
+                        val current = plotted[index]
+                        val next = plotted[index + 1]
+                        val controlX = (current.x + next.x) / 2f
+                        cubicTo(controlX, current.y, controlX, next.y, next.x, next.y)
+                    }
+                }
+
+                drawPath(
+                    path = linePath,
+                    color = primaryColor,
+                    style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round)
+                )
+
+                plotted.forEachIndexed { index, offset ->
+                    val selected = index == selectedIndex
+                    drawCircle(
+                        color = if (selected) selectedMarkerColor else unselectedMarkerColor,
+                        radius = if (selected) 8.dp.toPx() else 6.dp.toPx(),
+                        center = offset
+                    )
+                    drawCircle(
+                        color = primaryColor,
+                        radius = if (selected) 4.dp.toPx() else 3.dp.toPx(),
+                        center = offset
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_sm)))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column {
+            points.forEachIndexed { index, point ->
                 Text(
-                    text = stringResource(id = R.string.home_setup_eyebrow),
+                    text = point.label,
+                    color = if (selectedIndex == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = if (selectedIndex == index) FontWeight.Bold else FontWeight.Medium,
+                    fontSize = textUnitResource(id = R.dimen.text_micro),
+                    modifier = Modifier.clickable { onPointSelected(index) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BudgetSummaryCard(
+    modifier: Modifier = Modifier,
+    budgets: List<BudgetUiModel>
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(dimensionResource(id = R.dimen.card_corner_large)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(dimensionResource(id = R.dimen.space_lg))) {
+            SectionHeading(
+                eyebrow = stringResource(id = R.string.home_budget_summary_eyebrow),
+                title = stringResource(id = R.string.home_budget_summary_title),
+                description = stringResource(id = R.string.home_budget_summary_description)
+            )
+            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_md)))
+            if (budgets.isEmpty()) {
+                Text(
+                    text = stringResource(id = R.string.home_budget_summary_empty),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = textUnitResource(id = R.dimen.text_body)
+                )
+            } else {
+                budgets.take(3).forEachIndexed { index, budget ->
+                    BudgetRow(budget = budget)
+                    if (index != budgets.take(3).lastIndex) {
+                        Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_md)))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecentTransactionsCard(
+    modifier: Modifier = Modifier,
+    latestTransaction: RecentTransactionUiModel?,
+    recentTransactions: List<RecentTransactionUiModel>
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(dimensionResource(id = R.dimen.card_corner_large)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(dimensionResource(id = R.dimen.space_lg))) {
+            SectionHeading(
+                eyebrow = stringResource(id = R.string.home_recent_eyebrow),
+                title = stringResource(id = R.string.home_recent_title),
+                description = stringResource(id = R.string.home_recent_description)
+            )
+            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_md)))
+            latestTransaction?.let {
+                HighlightTransactionCard(transaction = it)
+                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_md)))
+            }
+            if (recentTransactions.isEmpty()) {
+                Text(
+                    text = stringResource(id = R.string.home_recent_empty),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = textUnitResource(id = R.dimen.text_body)
+                )
+            } else {
+                recentTransactions.forEachIndexed { index, transaction ->
+                    TransactionRow(transaction = transaction)
+                    if (index != recentTransactions.lastIndex) {
+                        Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_sm)))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HighlightTransactionCard(transaction: RecentTransactionUiModel) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+        shape = RoundedCornerShape(dimensionResource(id = R.dimen.card_corner_medium))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(dimensionResource(id = R.dimen.space_md)),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(id = R.string.home_latest_transaction_title),
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = textUnitResource(id = R.dimen.text_micro)
                 )
                 Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_xs)))
                 Text(
-                    text = stringResource(id = R.string.home_setup_title),
-                    color = MaterialTheme.colorScheme.onSurface,
+                    text = transaction.title,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
                     fontWeight = FontWeight.Bold,
-                    fontSize = textUnitResource(id = R.dimen.text_heading)
+                    fontSize = textUnitResource(id = R.dimen.text_heading_small)
                 )
-                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_sm)))
+                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_xs)))
                 Text(
-                    text = stringResource(id = R.string.home_setup_description),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = textUnitResource(id = R.dimen.text_body)
+                    text = "${transaction.sourceLabel} • ${transaction.dateLabel}",
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f),
+                    fontSize = textUnitResource(id = R.dimen.text_caption)
                 )
-                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_lg)))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(dimensionResource(id = R.dimen.hero_orb_size))
-                            .clip(RoundedCornerShape(dimensionResource(id = R.dimen.hero_corner)))
-                            .background(MaterialTheme.colorScheme.primary),
-                        contentAlignment = Alignment.Center
+            }
+            Text(
+                text = "Rs ${formatIndianCurrency(transaction.amount)}",
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                fontWeight = FontWeight.Bold,
+                fontSize = textUnitResource(id = R.dimen.text_heading_small)
+            )
+        }
+    }
+}
+
+@Composable
+private fun TransactionRow(transaction: RecentTransactionUiModel) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.secondaryContainer),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = transaction.sourceLabel.take(1),
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        Spacer(modifier = Modifier.width(dimensionResource(id = R.dimen.space_sm)))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = transaction.title,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = textUnitResource(id = R.dimen.text_body)
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "${transaction.subtitle} • ${transaction.dateLabel}",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = textUnitResource(id = R.dimen.text_caption)
+            )
+        }
+        Text(
+            text = "Rs ${formatIndianCurrency(transaction.amount)}",
+            color = MaterialTheme.colorScheme.onSurface,
+            fontWeight = FontWeight.Bold,
+            fontSize = textUnitResource(id = R.dimen.text_body)
+        )
+    }
+}
+
+@Composable
+private fun CategoryBreakdownCard(categories: List<CategoryBreakdownUiModel>) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(dimensionResource(id = R.dimen.card_corner_large)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(dimensionResource(id = R.dimen.space_lg))) {
+            SectionHeading(
+                eyebrow = stringResource(id = R.string.categories_breakdown_eyebrow),
+                title = stringResource(id = R.string.categories_breakdown_title),
+                description = stringResource(id = R.string.categories_breakdown_description)
+            )
+            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_md)))
+            categories.forEachIndexed { index, item ->
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "$connectedCount/$availableCount",
-                            color = MaterialTheme.colorScheme.onPrimary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = textUnitResource(id = R.dimen.text_heading_small)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(dimensionResource(id = R.dimen.space_md)))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = stringResource(id = R.string.home_reading_sources),
+                            text = item.title,
                             color = MaterialTheme.colorScheme.onSurface,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = textUnitResource(id = R.dimen.text_body)
+                            fontWeight = FontWeight.Medium,
+                            fontSize = textUnitResource(id = R.dimen.text_caption)
                         )
-                        Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_xs)))
-                        LinearProgressIndicator(
-                            progress = { progress },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(dimensionResource(id = R.dimen.progress_height))
-                                .clip(RoundedCornerShape(dimensionResource(id = R.dimen.progress_corner))),
-                            color = MaterialTheme.colorScheme.primary,
-                            trackColor = MaterialTheme.colorScheme.surface
-                        )
-                        Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_xs)))
                         Text(
-                            text = "${(progress * 100).toInt()}% ${stringResource(id = R.string.home_progress_complete)}",
+                            text = "Rs ${formatIndianCurrency(item.amount)}",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.SemiBold,
                             fontSize = textUnitResource(id = R.dimen.text_caption)
                         )
                     }
+                    Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_xs)))
+                    LinearProgressIndicator(
+                        progress = { item.ratio },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(dimensionResource(id = R.dimen.progress_height))
+                            .clip(RoundedCornerShape(dimensionResource(id = R.dimen.progress_corner))),
+                        color = if (index % 2 == 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
+                        trackColor = MaterialTheme.colorScheme.primaryContainer
+                    )
                 }
-                Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_lg)))
-                Row(horizontalArrangement = Arrangement.spacedBy(dimensionResource(id = R.dimen.space_sm))) {
-                    Button(
-                        onClick = onAllowAllClick,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(dimensionResource(id = R.dimen.button_height_large))
-                    ) {
-                        Text(text = stringResource(id = R.string.home_allow_all))
-                    }
-                    OutlinedButton(
-                        onClick = onRefreshReading,
-                        enabled = canRefresh && !isRefreshing,
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(dimensionResource(id = R.dimen.button_height_large))
-                    ) {
-                        Text(text = stringResource(id = R.string.home_refresh))
+                if (index != categories.lastIndex) {
+                    Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_md)))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BudgetPlannerCard(
+    budgets: List<BudgetUiModel>,
+    selectedCategory: String,
+    amount: String,
+    onCategorySelected: (String) -> Unit,
+    onAmountChanged: (String) -> Unit,
+    onCreateBudget: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(dimensionResource(id = R.dimen.card_corner_large)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(modifier = Modifier.padding(dimensionResource(id = R.dimen.space_lg))) {
+            SectionHeading(
+                eyebrow = stringResource(id = R.string.categories_budget_eyebrow),
+                title = stringResource(id = R.string.categories_budget_title),
+                description = stringResource(id = R.string.categories_budget_description)
+            )
+            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_md)))
+            Row(horizontalArrangement = Arrangement.spacedBy(dimensionResource(id = R.dimen.space_sm))) {
+                listOf("Food", "Shopping", "Bills", "Transport", "Others").forEach { category ->
+                    TrackingOptionChip(
+                        text = category,
+                        selected = selectedCategory == category,
+                        onClick = { onCategorySelected(category) }
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_md)))
+            OutlinedTextField(
+                value = amount,
+                onValueChange = onAmountChanged,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(text = stringResource(id = R.string.categories_budget_amount_label)) },
+                prefix = { Text(text = "Rs") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true
+            )
+            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_md)))
+            Button(
+                onClick = onCreateBudget,
+                enabled = amount.isNotBlank(),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(text = stringResource(id = R.string.categories_budget_create))
+            }
+            AnimatedVisibility(visible = budgets.isNotEmpty()) {
+                Column(modifier = Modifier.padding(top = dimensionResource(id = R.dimen.space_lg))) {
+                    budgets.forEachIndexed { index, budget ->
+                        BudgetRow(budget = budget)
+                        if (index != budgets.lastIndex) {
+                            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_md)))
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun BudgetRow(budget: BudgetUiModel) {
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                Text(
+                    text = budget.category,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = textUnitResource(id = R.dimen.text_body)
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Rs ${formatIndianCurrency(budget.spent)} spent of Rs ${formatIndianCurrency(budget.limit)}",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = textUnitResource(id = R.dimen.text_caption)
+                )
+            }
+            Text(
+                text = "Rs ${formatIndianCurrency(budget.remaining)} left",
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = textUnitResource(id = R.dimen.text_caption)
+            )
+        }
+        Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_xs)))
+        LinearProgressIndicator(
+            progress = { budget.progress },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(dimensionResource(id = R.dimen.progress_height))
+                .clip(RoundedCornerShape(dimensionResource(id = R.dimen.progress_corner))),
+            color = MaterialTheme.colorScheme.primary,
+            trackColor = MaterialTheme.colorScheme.primaryContainer
+        )
     }
 }
 
@@ -524,7 +1140,7 @@ private fun SourceCard(item: SourceSetupUiModel, onClick: () -> Unit) {
                 }
                 ActionPill(text = item.actionLabel, enabled = item.isAvailable || item.isConnected)
             }
-            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_md)))
+            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_sm)))
             Text(
                 text = item.description,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -536,6 +1152,7 @@ private fun SourceCard(item: SourceSetupUiModel, onClick: () -> Unit) {
 
 @Composable
 private fun ReadingCard(
+    modifier: Modifier = Modifier,
     progress: Float,
     status: String,
     hint: String,
@@ -545,6 +1162,7 @@ private fun ReadingCard(
     onRefreshReading: () -> Unit
 ) {
     Card(
+        modifier = modifier,
         shape = RoundedCornerShape(dimensionResource(id = R.dimen.card_corner_large)),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
@@ -643,6 +1261,21 @@ private fun SetupBottomSheet(
                 .padding(horizontal = dimensionResource(id = R.dimen.space_lg))
                 .padding(bottom = dimensionResource(id = R.dimen.space_lg))
         ) {
+            Box(
+                modifier = Modifier
+                    .size(80.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "PW",
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = textUnitResource(id = R.dimen.text_heading)
+                )
+            }
+            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_md)))
             Text(
                 text = if (uiState.setupSheetMode == SetupSheetMode.ALL) {
                     stringResource(id = R.string.home_setup_sheet_all_title)
@@ -670,6 +1303,20 @@ private fun SetupBottomSheet(
             uiState.sourceItems.forEach { item ->
                 SourceCard(item = item, onClick = {})
                 Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_sm)))
+            }
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = dimensionResource(id = R.dimen.space_sm)),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.primaryContainer
+            ) {
+                Text(
+                    text = stringResource(id = R.string.home_setup_sheet_privacy),
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    fontSize = textUnitResource(id = R.dimen.text_micro),
+                    modifier = Modifier.padding(dimensionResource(id = R.dimen.space_sm))
+                )
             }
             Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_md)))
             Button(
@@ -715,6 +1362,24 @@ private fun SectionHeading(eyebrow: String, title: String, description: String) 
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         fontSize = textUnitResource(id = R.dimen.text_body)
     )
+}
+
+@Composable
+private fun MetricLabel(title: String, value: String) {
+    Column {
+        Text(
+            text = title,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = textUnitResource(id = R.dimen.text_micro)
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = value,
+            color = MaterialTheme.colorScheme.onSurface,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = textUnitResource(id = R.dimen.text_caption)
+        )
+    }
 }
 
 @Composable
@@ -821,4 +1486,12 @@ private fun setupHint(item: SourceSetupUiModel?): String {
 
         null -> stringResource(id = R.string.home_setup_sheet_description)
     }
+}
+
+private fun formatIndianCurrency(amount: Int): String {
+    val text = amount.toString()
+    if (text.length <= 3) return text
+    val lastThree = text.takeLast(3)
+    val remaining = text.dropLast(3).reversed().chunked(2).joinToString(",").reversed()
+    return "$remaining,$lastThree"
 }

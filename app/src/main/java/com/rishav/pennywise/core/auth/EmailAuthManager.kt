@@ -7,6 +7,7 @@ import android.content.Intent
 import android.net.Uri
 import com.rishav.pennywise.BuildConfig
 import com.rishav.pennywise.MainActivity
+import com.rishav.pennywise.core.sms.SmsTransactionRecord
 import com.rishav.pennywise.feature.dashboard.presentation.SourceType
 import net.openid.appauth.AuthorizationException
 import net.openid.appauth.AuthorizationRequest
@@ -16,15 +17,17 @@ import net.openid.appauth.AuthorizationServiceConfiguration
 import net.openid.appauth.ResponseTypeValues
 import org.json.JSONObject
 import java.io.BufferedReader
-import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
+import java.time.Instant
+import java.time.OffsetDateTime
 
 data class EmailAuthSummary(
     val provider: SourceType,
     val matchedCount: Int,
-    val description: String
+    val description: String,
+    val transactions: List<SmsTransactionRecord>
 )
 
 class EmailAuthManager {
@@ -116,16 +119,23 @@ class EmailAuthManager {
         val response = connection.inputStream.bufferedReader().use(BufferedReader::readText)
         connection.disconnect()
         val json = JSONObject(response)
-        val estimate = json.optInt("resultSizeEstimate", 0)
+        val messages = json.optJSONArray("messages")
+        val transactions = mutableListOf<SmsTransactionRecord>()
+        for (index in 0 until minOf(messages?.length() ?: 0, 15)) {
+            val id = messages?.optJSONObject(index)?.optString("id").orEmpty()
+            if (id.isBlank()) continue
+            fetchGmailMessage(accessToken, id)?.let(transactions::add)
+        }
         return EmailAuthSummary(
             provider = SourceType.GMAIL,
-            matchedCount = estimate,
-            description = "Gmail connected and can see about $estimate recent messages."
+            matchedCount = transactions.size,
+            description = "Gmail connected and parsed ${transactions.size} likely transaction emails.",
+            transactions = transactions
         )
     }
 
     private fun fetchOutlookSummary(accessToken: String): EmailAuthSummary {
-        val connection = URL("https://graph.microsoft.com/v1.0/me/messages?\$top=25&\$select=subject,receivedDateTime").openConnection() as HttpURLConnection
+        val connection = URL("https://graph.microsoft.com/v1.0/me/messages?\$top=25&\$select=subject,bodyPreview,receivedDateTime").openConnection() as HttpURLConnection
         connection.requestMethod = "GET"
         connection.setRequestProperty("Authorization", "Bearer $accessToken")
         connection.setRequestProperty("Accept", "application/json")
@@ -133,12 +143,41 @@ class EmailAuthManager {
         connection.disconnect()
         val json = JSONObject(response)
         val messages = json.optJSONArray("value")
-        val count = messages?.length() ?: 0
+        val transactions = mutableListOf<SmsTransactionRecord>()
+        for (index in 0 until (messages?.length() ?: 0)) {
+            val message = messages?.optJSONObject(index) ?: continue
+            parseEmailTransaction(
+                content = listOf(
+                    message.optString("subject"),
+                    message.optString("bodyPreview")
+                ).joinToString(" "),
+                timestampMillis = message.optString("receivedDateTime")
+                    .takeIf { it.isNotBlank() }
+                    ?.let { OffsetDateTime.parse(it).toInstant().toEpochMilli() }
+                    ?: System.currentTimeMillis()
+            )?.let(transactions::add)
+        }
         return EmailAuthSummary(
             provider = SourceType.OUTLOOK,
-            matchedCount = count,
-            description = "Outlook connected and fetched $count recent messages."
+            matchedCount = transactions.size,
+            description = "Outlook connected and parsed ${transactions.size} likely transaction emails.",
+            transactions = transactions
         )
+    }
+
+    private fun fetchGmailMessage(accessToken: String, messageId: String): SmsTransactionRecord? {
+        val connection = URL("https://gmail.googleapis.com/gmail/v1/users/me/messages/$messageId?format=metadata").openConnection() as HttpURLConnection
+        connection.requestMethod = "GET"
+        connection.setRequestProperty("Authorization", "Bearer $accessToken")
+        connection.setRequestProperty("Accept", "application/json")
+        val response = connection.inputStream.bufferedReader().use(BufferedReader::readText)
+        connection.disconnect()
+        val json = JSONObject(response)
+        val snippet = json.optString("snippet")
+        val timestamp = json.optString("internalDate")
+            .toLongOrNull()
+            ?: Instant.now().toEpochMilli()
+        return parseEmailTransaction(snippet, timestamp)
     }
 
     private fun postForm(url: String, body: String): JSONObject {
@@ -198,5 +237,46 @@ class EmailAuthManager {
         const val ACTION_AUTH_COMPLETE = "com.rishav.pennywise.AUTH_COMPLETE"
         const val ACTION_AUTH_CANCELLED = "com.rishav.pennywise.AUTH_CANCELLED"
         const val EXTRA_PROVIDER = "auth_provider"
+    }
+
+    private fun parseEmailTransaction(
+        content: String,
+        timestampMillis: Long
+    ): SmsTransactionRecord? {
+        val expenseRegex = Regex(
+            pattern = "\\b(debited|spent|purchase|txn|transaction|upi|withdrawn|paid|payment|charged|order|receipt|invoice)\\b",
+            option = RegexOption.IGNORE_CASE
+        )
+        val amountRegex = Regex(
+            pattern = "(?:Rs\\.?|INR|₹)\\s*([0-9,]+(?:\\.\\d{1,2})?)",
+            option = RegexOption.IGNORE_CASE
+        )
+
+        if (!expenseRegex.containsMatchIn(content)) return null
+
+        val amount = amountRegex.find(content)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.replace(",", "")
+            ?.substringBefore(".")
+            ?.toIntOrNull()
+            ?: return null
+
+        return SmsTransactionRecord(
+            amount = amount,
+            timestampMillis = timestampMillis,
+            category = detectCategory(content)
+        )
+    }
+
+    private fun detectCategory(content: String): String {
+        val text = content.lowercase()
+        return when {
+            listOf("swiggy", "zomato", "restaurant", "food", "cafe").any(text::contains) -> "Food"
+            listOf("uber", "ola", "metro", "irctc", "fuel", "petrol", "diesel", "transport").any(text::contains) -> "Transport"
+            listOf("amazon", "flipkart", "myntra", "shopping", "store", "mart").any(text::contains) -> "Shopping"
+            listOf("electricity", "water", "gas", "broadband", "recharge", "bill", "invoice").any(text::contains) -> "Bills"
+            else -> "Others"
+        }
     }
 }

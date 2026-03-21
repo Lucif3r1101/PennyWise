@@ -10,8 +10,9 @@ enum class DashboardTab(
 }
 
 enum class TrackingStartOption {
-    FROM_NOW,
-    FROM_THIS_YEAR
+    WEEKLY,
+    MONTHLY,
+    YEARLY
 }
 
 enum class SetupSheetMode {
@@ -35,9 +36,43 @@ data class SourceSetupUiModel(
     val isAvailable: Boolean
 )
 
+data class ChartPointUiModel(
+    val label: String,
+    val value: Float,
+    val amount: Int
+)
+
+data class CategoryBreakdownUiModel(
+    val title: String,
+    val amount: Int,
+    val ratio: Float
+)
+
+data class RecentTransactionUiModel(
+    val id: String,
+    val title: String,
+    val subtitle: String,
+    val amount: Int,
+    val dateLabel: String,
+    val sourceLabel: String
+)
+
+data class BudgetUiModel(
+    val id: String,
+    val category: String,
+    val limit: Int,
+    val spent: Int
+) {
+    val progress: Float
+        get() = if (limit == 0) 0f else (spent.toFloat() / limit.toFloat()).coerceAtMost(1f)
+
+    val remaining: Int
+        get() = (limit - spent).coerceAtLeast(0)
+}
+
 data class DashboardUiState(
     val selectedTab: DashboardTab = DashboardTab.HOME,
-    val trackingStartOption: TrackingStartOption = TrackingStartOption.FROM_NOW,
+    val trackingStartOption: TrackingStartOption = TrackingStartOption.WEEKLY,
     val readingProgress: Float = 0f,
     val readingStatus: String = "",
     val readingHint: String = "",
@@ -47,9 +82,23 @@ data class DashboardUiState(
     val activeEmailAuthSource: SourceType? = null,
     val setupSheetMode: SetupSheetMode? = null,
     val selectedSourceType: SourceType? = null,
-    val sourceItems: List<SourceSetupUiModel> = emptyList()
+    val sourceItems: List<SourceSetupUiModel> = emptyList(),
+    val totalExpense: Int = 6480,
+    val budgetTarget: Int = 9000,
+    val chartPoints: List<ChartPointUiModel> = emptyList(),
+    val selectedChartPointIndex: Int = 0,
+    val categoryBreakdown: List<CategoryBreakdownUiModel> = emptyList(),
+    val latestTransaction: RecentTransactionUiModel? = null,
+    val recentTransactions: List<RecentTransactionUiModel> = emptyList(),
+    val budgets: List<BudgetUiModel> = emptyList(),
+    val budgetDraftCategory: String = "Food",
+    val budgetDraftAmount: String = ""
 ) {
     val connectedCount: Int = sourceItems.count { it.isConnected }
     val availableCount: Int = sourceItems.count { it.isAvailable }
     val canRefresh: Boolean = connectedCount > 0
+    val selectedChartPoint: ChartPointUiModel?
+        get() = chartPoints.getOrNull(selectedChartPointIndex)
+    val configuredBudgetTotal: Int
+        get() = budgets.sumOf { it.limit }
 }
