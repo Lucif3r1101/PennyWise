@@ -57,6 +57,11 @@ data class RecentTransactionUiModel(
     val sourceLabel: String
 )
 
+data class AiInsightUiModel(
+    val title: String,
+    val description: String
+)
+
 data class BudgetUiModel(
     val id: String,
     val category: String,
@@ -90,6 +95,7 @@ data class DashboardUiState(
     val categoryBreakdown: List<CategoryBreakdownUiModel> = emptyList(),
     val latestTransaction: RecentTransactionUiModel? = null,
     val recentTransactions: List<RecentTransactionUiModel> = emptyList(),
+    val aiInsights: List<AiInsightUiModel> = emptyList(),
     val budgets: List<BudgetUiModel> = emptyList(),
     val budgetDraftCategory: String = "Food",
     val budgetDraftAmount: String = ""

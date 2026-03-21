@@ -2,11 +2,17 @@ package com.rishav.pennywise.core.sms
 
 import android.content.Context
 import android.provider.Telephony
+import com.rishav.pennywise.core.transactions.LocalTransactionEngine
+import com.rishav.pennywise.core.transactions.TransactionKind
 
 data class SmsTransactionRecord(
     val amount: Int,
     val timestampMillis: Long,
-    val category: String
+    val category: String,
+    val merchant: String? = null,
+    val kind: TransactionKind = TransactionKind.EXPENSE,
+    val confidence: Float = 0f,
+    val referenceId: String? = null
 )
 
 data class SmsSyncSummary(
@@ -19,17 +25,9 @@ class SmsTransactionReader {
 
     fun readSummary(context: Context): SmsSyncSummary {
         val projection = arrayOf(
+            Telephony.Sms.ADDRESS,
             Telephony.Sms.BODY,
             Telephony.Sms.DATE
-        )
-
-        val expenseRegex = Regex(
-            pattern = "\\b(debited|spent|purchase|txn|transaction|upi|withdrawn|paid|payment|sent|charged)\\b",
-            option = RegexOption.IGNORE_CASE
-        )
-        val amountRegex = Regex(
-            pattern = "(?:Rs\\.?|INR|₹)\\s*([0-9,]+(?:\\.\\d{1,2})?)",
-            option = RegexOption.IGNORE_CASE
         )
 
         var scanned = 0
@@ -42,28 +40,29 @@ class SmsTransactionReader {
             null,
             "${Telephony.Sms.DATE} DESC"
         )?.use { cursor ->
+            val addressIndex = cursor.getColumnIndex(Telephony.Sms.ADDRESS)
             val bodyIndex = cursor.getColumnIndex(Telephony.Sms.BODY)
             val dateIndex = cursor.getColumnIndex(Telephony.Sms.DATE)
 
             while (cursor.moveToNext()) {
                 scanned += 1
+                val address = if (addressIndex >= 0) cursor.getString(addressIndex).orEmpty() else ""
                 val body = if (bodyIndex >= 0) cursor.getString(bodyIndex).orEmpty() else ""
                 val timestamp = if (dateIndex >= 0) cursor.getLong(dateIndex) else 0L
-
-                if (!expenseRegex.containsMatchIn(body)) continue
-
-                val amount = amountRegex.find(body)
-                    ?.groupValues
-                    ?.getOrNull(1)
-                    ?.replace(",", "")
-                    ?.substringBefore(".")
-                    ?.toIntOrNull()
-                    ?: continue
+                val parsed = LocalTransactionEngine.parse(
+                    content = body,
+                    timestampMillis = timestamp,
+                    sender = address
+                ) ?: continue
 
                 transactions += SmsTransactionRecord(
-                    amount = amount,
-                    timestampMillis = timestamp,
-                    category = detectCategory(body)
+                    amount = parsed.amount,
+                    timestampMillis = parsed.timestampMillis,
+                    category = parsed.category,
+                    merchant = parsed.merchant,
+                    kind = parsed.kind,
+                    confidence = parsed.confidence,
+                    referenceId = parsed.referenceId
                 )
             }
         }
@@ -73,16 +72,5 @@ class SmsTransactionReader {
             transactionMessageCount = transactions.size,
             transactions = transactions
         )
-    }
-
-    private fun detectCategory(body: String): String {
-        val text = body.lowercase()
-        return when {
-            listOf("swiggy", "zomato", "restaurant", "food", "cafe").any(text::contains) -> "Food"
-            listOf("uber", "ola", "metro", "irctc", "fuel", "petrol", "diesel", "transport").any(text::contains) -> "Transport"
-            listOf("amazon", "flipkart", "myntra", "shopping", "store", "mart").any(text::contains) -> "Shopping"
-            listOf("electricity", "water", "gas", "broadband", "recharge", "bill").any(text::contains) -> "Bills"
-            else -> "Others"
-        }
     }
 }

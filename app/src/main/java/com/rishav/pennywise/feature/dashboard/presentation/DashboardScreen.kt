@@ -1,7 +1,6 @@
 package com.rishav.pennywise.feature.dashboard.presentation
 
 import android.Manifest
-import android.app.Activity
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -47,6 +46,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -70,8 +70,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.rishav.pennywise.R
-import com.rishav.pennywise.core.auth.AuthRedirectRelay
-import com.rishav.pennywise.core.auth.EmailAuthManager
 import com.rishav.pennywise.core.sms.SmsTransactionReader
 import com.rishav.pennywise.core.ui.textUnitResource
 import kotlin.math.abs
@@ -82,10 +80,8 @@ fun DashboardRoute(
     viewModel: DashboardViewModel = viewModel()
 ) {
     val context = LocalContext.current
-    val activity = context as? Activity
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val smsReader = SmsTransactionReader()
-    val emailAuthManager = remember { EmailAuthManager() }
 
     val smsPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -98,7 +94,7 @@ fun DashboardRoute(
                 .onSuccess(viewModel::onSmsSyncCompleted)
                 .onFailure { viewModel.onSmsSyncFailed(it.message ?: "Unknown SMS sync error.") }
             if (wasAllowAllFlow) {
-                viewModel.connectConfiguredEmailSources()
+                viewModel.onConfiguredSourcesAcknowledged()
             } else {
                 viewModel.onSetupPrimaryHandledForCurrentSelection()
             }
@@ -113,19 +109,6 @@ fun DashboardRoute(
         viewModel.onSmsPermissionStateChanged(granted)
     }
 
-    LaunchedEffect(Unit) {
-        AuthRedirectRelay.events.collect { intent ->
-            val provider = intent.getStringExtra(EmailAuthManager.EXTRA_PROVIDER)?.let(SourceType::valueOf)
-            emailAuthManager.completeAuthorization(context, intent)
-                .onSuccess(viewModel::onEmailAuthCompleted)
-                .onFailure {
-                    if (provider != null) {
-                        viewModel.onEmailAuthFailed(provider, it.message ?: "Could not complete sign-in.")
-                    }
-                }
-        }
-    }
-
     DashboardScreen(
         uiState = uiState,
         modifier = modifier,
@@ -133,7 +116,15 @@ fun DashboardRoute(
         onTrackingStartOptionSelected = viewModel::onTrackingStartOptionSelected,
         onChartPointSelected = viewModel::onChartPointSelected,
         onAllowAllClick = viewModel::onAllowAllClick,
-        onSourceSelected = viewModel::onSourceSelected,
+        onSourceSelected = { sourceType ->
+            if (sourceType == SourceType.SMS) {
+                if (!uiState.smsPermissionGranted) {
+                    smsPermissionLauncher.launch(Manifest.permission.READ_SMS)
+                } else {
+                    viewModel.onSourceSelected(sourceType)
+                }
+            }
+        },
         onDismissSetupSheet = viewModel::onDismissSetupSheet,
         onSetupPrimaryClick = {
             when {
@@ -141,7 +132,7 @@ fun DashboardRoute(
                     if (!uiState.smsPermissionGranted) {
                         smsPermissionLauncher.launch(Manifest.permission.READ_SMS)
                     } else {
-                        viewModel.connectConfiguredEmailSources()
+                        viewModel.onConfiguredSourcesAcknowledged()
                     }
                 }
 
@@ -151,17 +142,7 @@ fun DashboardRoute(
                     }
                 }
 
-                uiState.selectedSourceType == SourceType.GMAIL || uiState.selectedSourceType == SourceType.OUTLOOK -> {
-                    val source = uiState.selectedSourceType
-                    if (source != null) {
-                        if (activity != null) {
-                            viewModel.onEmailAuthStarted(source)
-                            emailAuthManager.startAuthorization(activity, source)
-                        } else {
-                            viewModel.onEmailAuthFailed(source, "Email sign-in needs an activity context.")
-                        }
-                    }
-                }
+                uiState.selectedSourceType == SourceType.GMAIL || uiState.selectedSourceType == SourceType.OUTLOOK -> Unit
             }
         },
         onGiveLaterClick = viewModel::onGiveLaterClick,
@@ -249,9 +230,8 @@ fun DashboardScreen(
                     onRefreshReading = onRefreshReading
                 )
 
-                DashboardTab.AI_INSIGHTS -> PlaceholderTab(
-                    title = stringResource(id = R.string.ai_insights_title),
-                    description = stringResource(id = R.string.ai_insights_placeholder)
+                DashboardTab.AI_INSIGHTS -> AiInsightsTabContent(
+                    insights = uiState.aiInsights
                 )
 
                 DashboardTab.CATEGORIES -> CategoriesTabContent(
@@ -362,6 +342,53 @@ private fun HomeTabContent(
                 isRefreshing = uiState.isRefreshing,
                 onRefreshReading = onRefreshReading
             )
+        }
+    }
+}
+
+@Composable
+private fun AiInsightsTabContent(
+    insights: List<AiInsightUiModel>
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            horizontal = dimensionResource(id = R.dimen.space_screen_horizontal),
+            vertical = dimensionResource(id = R.dimen.space_screen_vertical)
+        ),
+        verticalArrangement = Arrangement.spacedBy(dimensionResource(id = R.dimen.space_lg))
+    ) {
+        item {
+            SectionHeading(
+                eyebrow = stringResource(id = R.string.ai_insights_title),
+                title = stringResource(id = R.string.ai_insights_header_title),
+                description = stringResource(id = R.string.ai_insights_header_description)
+            )
+        }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(dimensionResource(id = R.dimen.space_md))) {
+                insights.forEach { insight ->
+                    Card(
+                        shape = RoundedCornerShape(dimensionResource(id = R.dimen.card_corner_large)),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                    ) {
+                        Column(modifier = Modifier.padding(dimensionResource(id = R.dimen.space_lg))) {
+                            Text(
+                                text = insight.title,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = textUnitResource(id = R.dimen.text_heading_small)
+                            )
+                            Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_xs)))
+                            Text(
+                                text = insight.description,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = textUnitResource(id = R.dimen.text_body)
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -874,7 +901,7 @@ private fun HighlightTransactionCard(transaction: RecentTransactionUiModel) {
                 )
                 Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_xs)))
                 Text(
-                    text = "${transaction.sourceLabel} • ${transaction.dateLabel}",
+                    text = "${transaction.sourceLabel} | ${transaction.dateLabel}",
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.72f),
                     fontSize = textUnitResource(id = R.dimen.text_caption)
                 )
@@ -918,7 +945,7 @@ private fun TransactionRow(transaction: RecentTransactionUiModel) {
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = "${transaction.subtitle} • ${transaction.dateLabel}",
+                text = "${transaction.subtitle} | ${transaction.dateLabel}",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = textUnitResource(id = R.dimen.text_caption)
             )
@@ -1006,13 +1033,20 @@ private fun BudgetPlannerCard(
                 description = stringResource(id = R.string.categories_budget_description)
             )
             Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_md)))
-            Row(horizontalArrangement = Arrangement.spacedBy(dimensionResource(id = R.dimen.space_sm))) {
-                listOf("Food", "Shopping", "Bills", "Transport", "Others").forEach { category ->
-                    TrackingOptionChip(
-                        text = category,
-                        selected = selectedCategory == category,
-                        onClick = { onCategorySelected(category) }
-                    )
+            Column(verticalArrangement = Arrangement.spacedBy(dimensionResource(id = R.dimen.space_sm))) {
+                listOf(
+                    listOf("Food", "Shopping", "Bills"),
+                    listOf("Transport", "Others")
+                ).forEach { rowItems ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(dimensionResource(id = R.dimen.space_sm))) {
+                        rowItems.forEach { category ->
+                            TrackingOptionChip(
+                                text = category,
+                                selected = selectedCategory == category,
+                                onClick = { onCategorySelected(category) }
+                            )
+                        }
+                    }
                 }
             }
             Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_md)))
@@ -1138,7 +1172,11 @@ private fun SourceCard(item: SourceSetupUiModel, onClick: () -> Unit) {
                         fontSize = textUnitResource(id = R.dimen.text_micro)
                     )
                 }
-                ActionPill(text = item.actionLabel, enabled = item.isAvailable || item.isConnected)
+                ActionPill(
+                    text = item.actionLabel,
+                    enabled = item.isAvailable || item.isConnected,
+                    onClick = onClick
+                )
             }
             Spacer(modifier = Modifier.height(dimensionResource(id = R.dimen.space_sm)))
             Text(
@@ -1383,11 +1421,12 @@ private fun MetricLabel(title: String, value: String) {
 }
 
 @Composable
-private fun ActionPill(text: String, enabled: Boolean) {
+private fun ActionPill(text: String, enabled: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(dimensionResource(id = R.dimen.card_corner_medium)))
             .background(if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant)
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(
                 horizontal = dimensionResource(id = R.dimen.space_sm),
                 vertical = dimensionResource(id = R.dimen.space_xs)
@@ -1462,8 +1501,8 @@ private fun PlaceholderTab(title: String, description: String) {
 private fun primaryButtonText(item: SourceSetupUiModel?): String {
     return when (item?.type) {
         SourceType.SMS -> stringResource(id = R.string.home_setup_sheet_primary_sms)
-        SourceType.GMAIL -> stringResource(id = R.string.home_setup_sheet_primary_gmail)
-        SourceType.OUTLOOK -> stringResource(id = R.string.home_setup_sheet_primary_outlook)
+        SourceType.GMAIL -> stringResource(id = R.string.home_setup_sheet_primary_sms)
+        SourceType.OUTLOOK -> stringResource(id = R.string.home_setup_sheet_primary_sms)
         null -> stringResource(id = R.string.home_setup_sheet_primary_all)
     }
 }
@@ -1472,17 +1511,8 @@ private fun primaryButtonText(item: SourceSetupUiModel?): String {
 private fun setupHint(item: SourceSetupUiModel?): String {
     return when (item?.type) {
         SourceType.SMS -> "SMS starts live transaction tracking across bank, card and UPI alerts."
-        SourceType.GMAIL -> if (item.isAvailable) {
-            "Gmail local config is present, so the app is ready for a real OAuth connection flow next."
-        } else {
-            "Add Gmail client values in local.properties before testing the real connection flow."
-        }
-
-        SourceType.OUTLOOK -> if (item.isAvailable) {
-            "Outlook local config is present, so Microsoft sign-in can be wired next."
-        } else {
-            "Add Outlook client values in local.properties before testing the real connection flow."
-        }
+        SourceType.GMAIL -> stringResource(id = R.string.home_setup_sheet_description)
+        SourceType.OUTLOOK -> stringResource(id = R.string.home_setup_sheet_description)
 
         null -> stringResource(id = R.string.home_setup_sheet_description)
     }

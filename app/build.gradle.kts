@@ -40,6 +40,10 @@ android {
         buildConfigField("String", "OUTLOOK_REDIRECT_SCHEME", "\"${localProperty("OUTLOOK_REDIRECT_SCHEME")}\"")
         buildConfigField("String", "OUTLOOK_REDIRECT_HOST", "\"${localProperty("OUTLOOK_REDIRECT_HOST")}\"")
         manifestPlaceholders["appAuthRedirectScheme"] = localProperty("GMAIL_REDIRECT_SCHEME").ifBlank { "com.rishav.pennywise" }
+        manifestPlaceholders["gmailRedirectScheme"] = localProperty("GMAIL_REDIRECT_SCHEME").ifBlank { "com.rishav.pennywise" }
+        manifestPlaceholders["gmailRedirectHost"] = localProperty("GMAIL_REDIRECT_HOST").ifBlank { "oauth2redirect" }
+        manifestPlaceholders["outlookRedirectScheme"] = localProperty("OUTLOOK_REDIRECT_SCHEME").ifBlank { "com.rishav.pennywise" }
+        manifestPlaceholders["outlookRedirectHost"] = localProperty("OUTLOOK_REDIRECT_HOST").ifBlank { "auth" }
     }
 
     buildTypes {
@@ -69,6 +73,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.appauth)
+    implementation(libs.play.services.auth)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)

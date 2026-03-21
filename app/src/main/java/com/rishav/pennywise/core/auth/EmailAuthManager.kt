@@ -8,6 +8,7 @@ import android.net.Uri
 import com.rishav.pennywise.BuildConfig
 import com.rishav.pennywise.MainActivity
 import com.rishav.pennywise.core.sms.SmsTransactionRecord
+import com.rishav.pennywise.core.transactions.LocalTransactionEngine
 import com.rishav.pennywise.feature.dashboard.presentation.SourceType
 import net.openid.appauth.AuthorizationException
 import net.openid.appauth.AuthorizationRequest
@@ -75,10 +76,7 @@ class EmailAuthManager {
         val response = AuthorizationResponse.fromIntent(intent)
         val exception = AuthorizationException.fromIntent(intent)
 
-        if (exception != null) {
-            return Result.failure(exception)
-        }
-
+        if (exception != null) return Result.failure(exception)
         response ?: return Result.failure(IllegalStateException("Missing authorization response"))
 
         val config = providerConfig(provider)
@@ -112,7 +110,7 @@ class EmailAuthManager {
     }
 
     private fun fetchGmailSummary(accessToken: String): EmailAuthSummary {
-        val connection = URL("https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=25&q=newer_than:365d").openConnection() as HttpURLConnection
+        val connection = URL("https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=30&q=newer_than:365d").openConnection() as HttpURLConnection
         connection.requestMethod = "GET"
         connection.setRequestProperty("Authorization", "Bearer $accessToken")
         connection.setRequestProperty("Accept", "application/json")
@@ -121,7 +119,7 @@ class EmailAuthManager {
         val json = JSONObject(response)
         val messages = json.optJSONArray("messages")
         val transactions = mutableListOf<SmsTransactionRecord>()
-        for (index in 0 until minOf(messages?.length() ?: 0, 15)) {
+        for (index in 0 until minOf(messages?.length() ?: 0, 18)) {
             val id = messages?.optJSONObject(index)?.optString("id").orEmpty()
             if (id.isBlank()) continue
             fetchGmailMessage(accessToken, id)?.let(transactions::add)
@@ -129,13 +127,13 @@ class EmailAuthManager {
         return EmailAuthSummary(
             provider = SourceType.GMAIL,
             matchedCount = transactions.size,
-            description = "Gmail connected and parsed ${transactions.size} likely transaction emails.",
+            description = "Gmail connected and parsed ${transactions.size} likely transaction emails locally.",
             transactions = transactions
         )
     }
 
     private fun fetchOutlookSummary(accessToken: String): EmailAuthSummary {
-        val connection = URL("https://graph.microsoft.com/v1.0/me/messages?\$top=25&\$select=subject,bodyPreview,receivedDateTime").openConnection() as HttpURLConnection
+        val connection = URL("https://graph.microsoft.com/v1.0/me/messages?\$top=30&\$select=subject,bodyPreview,receivedDateTime").openConnection() as HttpURLConnection
         connection.requestMethod = "GET"
         connection.setRequestProperty("Authorization", "Bearer $accessToken")
         connection.setRequestProperty("Accept", "application/json")
@@ -160,7 +158,7 @@ class EmailAuthManager {
         return EmailAuthSummary(
             provider = SourceType.OUTLOOK,
             matchedCount = transactions.size,
-            description = "Outlook connected and parsed ${transactions.size} likely transaction emails.",
+            description = "Outlook connected and parsed ${transactions.size} likely transaction emails locally.",
             transactions = transactions
         )
     }
@@ -243,40 +241,15 @@ class EmailAuthManager {
         content: String,
         timestampMillis: Long
     ): SmsTransactionRecord? {
-        val expenseRegex = Regex(
-            pattern = "\\b(debited|spent|purchase|txn|transaction|upi|withdrawn|paid|payment|charged|order|receipt|invoice)\\b",
-            option = RegexOption.IGNORE_CASE
-        )
-        val amountRegex = Regex(
-            pattern = "(?:Rs\\.?|INR|₹)\\s*([0-9,]+(?:\\.\\d{1,2})?)",
-            option = RegexOption.IGNORE_CASE
-        )
-
-        if (!expenseRegex.containsMatchIn(content)) return null
-
-        val amount = amountRegex.find(content)
-            ?.groupValues
-            ?.getOrNull(1)
-            ?.replace(",", "")
-            ?.substringBefore(".")
-            ?.toIntOrNull()
-            ?: return null
-
+        val parsed = LocalTransactionEngine.parse(content, timestampMillis) ?: return null
         return SmsTransactionRecord(
-            amount = amount,
-            timestampMillis = timestampMillis,
-            category = detectCategory(content)
+            amount = parsed.amount,
+            timestampMillis = parsed.timestampMillis,
+            category = parsed.category,
+            merchant = parsed.merchant,
+            kind = parsed.kind,
+            confidence = parsed.confidence,
+            referenceId = parsed.referenceId
         )
-    }
-
-    private fun detectCategory(content: String): String {
-        val text = content.lowercase()
-        return when {
-            listOf("swiggy", "zomato", "restaurant", "food", "cafe").any(text::contains) -> "Food"
-            listOf("uber", "ola", "metro", "irctc", "fuel", "petrol", "diesel", "transport").any(text::contains) -> "Transport"
-            listOf("amazon", "flipkart", "myntra", "shopping", "store", "mart").any(text::contains) -> "Shopping"
-            listOf("electricity", "water", "gas", "broadband", "recharge", "bill", "invoice").any(text::contains) -> "Bills"
-            else -> "Others"
-        }
     }
 }

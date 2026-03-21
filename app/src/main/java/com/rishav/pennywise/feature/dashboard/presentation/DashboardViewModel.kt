@@ -1,10 +1,11 @@
 package com.rishav.pennywise.feature.dashboard.presentation
 
 import androidx.lifecycle.ViewModel
-import com.rishav.pennywise.BuildConfig
+import com.rishav.pennywise.core.ai.LocalAiOrchestrator
 import com.rishav.pennywise.core.auth.EmailAuthSummary
 import com.rishav.pennywise.core.sms.SmsSyncSummary
 import com.rishav.pennywise.core.sms.SmsTransactionRecord
+import com.rishav.pennywise.core.transactions.TransactionKind
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,36 +22,40 @@ import kotlin.math.ceil
 
 class DashboardViewModel : ViewModel() {
 
-    private val gmailConfigured = BuildConfig.GMAIL_CONFIGURED
-    private val outlookConfigured = BuildConfig.OUTLOOK_CONFIGURED
     private val zoneId = ZoneId.systemDefault()
+    private val localAiOrchestrator = LocalAiOrchestrator()
     private var latestSmsTransactions: List<TrackedTransaction> = emptyList()
     private var latestEmailTransactions: List<TrackedTransaction> = emptyList()
+
+    private val defaultBudgets = listOf(
+        BudgetUiModel(
+            id = "budget-food",
+            category = "Food",
+            limit = 6000,
+            spent = 1880
+        )
+    )
 
     private val _uiState = MutableStateFlow(
         DashboardUiState(
             readingProgress = 0.18f,
             readingStatus = "Waiting for your first connected source",
-            readingHint = "Connect SMS, Gmail, or Outlook to begin reading data.",
+            readingHint = "Connect SMS to begin reading transaction data.",
             sourceItems = buildSourceItems(
-                smsPermissionGranted = false,
-                gmailConnected = false,
-                outlookConnected = false
+                smsPermissionGranted = false
             ),
             chartPoints = placeholderChartPoints(TrackingStartOption.WEEKLY),
             selectedChartPointIndex = placeholderChartPoints(TrackingStartOption.WEEKLY).lastIndex,
             categoryBreakdown = placeholderCategories(6480),
             totalExpense = 6480,
             budgetTarget = 9000,
-            budgets = listOf(
-                BudgetUiModel(
-                    id = "budget-food",
-                    category = "Food",
-                    limit = 6000,
-                    spent = 1880
-                )
-            ),
-            budgetDraftCategory = "Food"
+            budgets = defaultBudgets,
+            budgetDraftCategory = "Food",
+            aiInsights = localAiOrchestrator.generateInsights(
+                transactions = emptyList(),
+                categories = placeholderCategories(6480),
+                budgets = defaultBudgets
+            )
         )
     )
     val uiState: StateFlow<DashboardUiState> = _uiState.asStateFlow()
@@ -108,43 +113,32 @@ class DashboardViewModel : ViewModel() {
                 selectedSourceType = null,
                 activeEmailAuthSource = null,
                 readingStatus = "Setup paused until you connect a source",
-                readingHint = "You can return here anytime and enable SMS, Gmail, or Outlook."
+                readingHint = "You can return here anytime and enable SMS."
             )
         }
     }
 
     fun onSmsPermissionStateChanged(granted: Boolean) {
-        _uiState.update {
-            val gmailConnected = it.sourceItems.firstOrNull { item -> item.type == SourceType.GMAIL }?.isConnected == true
-            val outlookConnected = it.sourceItems.firstOrNull { item -> item.type == SourceType.OUTLOOK }?.isConnected == true
-            it.copy(
+        _uiState.update { state ->
+            state.copy(
                 smsPermissionGranted = granted,
-                sourceItems = buildSourceItems(
-                    smsPermissionGranted = granted,
-                    gmailConnected = gmailConnected,
-                    outlookConnected = outlookConnected
-                )
+                sourceItems = buildSourceItems(smsPermissionGranted = granted)
             )
         }
     }
 
-    fun connectConfiguredEmailSources() {
+    fun onConfiguredSourcesAcknowledged() {
         _uiState.update {
             it.copy(
-                sourceItems = buildSourceItems(
-                    smsPermissionGranted = it.smsPermissionGranted,
-                    gmailConnected = gmailConfigured,
-                    outlookConnected = outlookConfigured
-                ),
                 setupSheetMode = null,
                 selectedSourceType = null,
                 activeEmailAuthSource = null,
                 readingStatus = if (it.smsPermissionGranted) {
-                    "Sources connected and ready to refresh"
+                    "SMS is connected and ready to track transactions."
                 } else {
-                    "Email providers are ready, SMS still needs permission"
+                    "SMS still needs permission."
                 },
-                readingHint = "Email providers are configured locally. Real email reading will require OAuth sign-in next."
+                readingHint = "Email sources are paused for now. We will add them back later."
             )
         }
     }
@@ -280,9 +274,7 @@ class DashboardViewModel : ViewModel() {
     }
 
     private fun buildSourceItems(
-        smsPermissionGranted: Boolean,
-        gmailConnected: Boolean,
-        outlookConnected: Boolean
+        smsPermissionGranted: Boolean
     ): List<SourceSetupUiModel> {
         return listOf(
             SourceSetupUiModel(
@@ -293,32 +285,6 @@ class DashboardViewModel : ViewModel() {
                 actionLabel = if (smsPermissionGranted) "Connected" else "Enable",
                 isConnected = smsPermissionGranted,
                 isAvailable = true
-            ),
-            SourceSetupUiModel(
-                type = SourceType.GMAIL,
-                title = "Gmail",
-                description = "Connect Gmail to import receipt emails and finance alerts.",
-                statusLabel = when {
-                    gmailConnected -> "Connected"
-                    gmailConfigured -> "Ready to connect"
-                    else -> "Missing local config"
-                },
-                actionLabel = if (gmailConnected) "Connected" else "Connect",
-                isConnected = gmailConnected,
-                isAvailable = gmailConfigured
-            ),
-            SourceSetupUiModel(
-                type = SourceType.OUTLOOK,
-                title = "Outlook",
-                description = "Connect Outlook to include work reimbursements and billing receipts.",
-                statusLabel = when {
-                    outlookConnected -> "Connected"
-                    outlookConfigured -> "Ready to connect"
-                    else -> "Missing local config"
-                },
-                actionLabel = if (outlookConnected) "Connected" else "Connect",
-                isConnected = outlookConnected,
-                isAvailable = outlookConfigured
             )
         )
     }
@@ -327,6 +293,7 @@ class DashboardViewModel : ViewModel() {
         state: DashboardUiState,
         transactions: List<TrackedTransaction>
     ): DashboardUiState {
+        val preferredTransactions = preferredTransactions(transactions)
         val analytics = computeAnalytics(transactions, state.trackingStartOption)
         val syncedBudgets = syncBudgetsWithCategories(state.budgets, analytics.categories)
         val budgetTarget = syncedBudgets.sumOf { it.limit }
@@ -339,11 +306,16 @@ class DashboardViewModel : ViewModel() {
             chartPoints = analytics.chartPoints,
             selectedChartPointIndex = analytics.defaultPointIndex,
             categoryBreakdown = analytics.categories,
-            latestTransaction = mapLatestTransaction(transactions.maxByOrNull { it.record.timestampMillis }),
-            recentTransactions = transactions
+            latestTransaction = mapLatestTransaction(preferredTransactions.maxByOrNull { it.record.timestampMillis }),
+            recentTransactions = preferredTransactions
                 .sortedByDescending { it.record.timestampMillis }
                 .take(6)
                 .map(::mapRecentTransaction),
+            aiInsights = localAiOrchestrator.generateInsights(
+                transactions = preferredTransactions.map { it.record },
+                categories = analytics.categories,
+                budgets = syncedBudgets
+            ),
             budgets = syncedBudgets
         )
     }
@@ -352,7 +324,8 @@ class DashboardViewModel : ViewModel() {
         transactions: List<TrackedTransaction>,
         option: TrackingStartOption
     ): AnalyticsSnapshot {
-        if (transactions.isEmpty()) {
+        val filteredTransactions = preferredTransactions(transactions)
+        if (filteredTransactions.isEmpty()) {
             val fallbackTotal = when (option) {
                 TrackingStartOption.WEEKLY -> 6480
                 TrackingStartOption.MONTHLY -> 18320
@@ -375,7 +348,7 @@ class DashboardViewModel : ViewModel() {
                 val weekStart = now.with(DayOfWeek.MONDAY)
                 val labels = (0..6).map { weekStart.plusDays(it.toLong()) }
                 val totals = labels.associateWith { 0 }.toMutableMap()
-                val filtered = transactions.filter { tracked ->
+                val filtered = filteredTransactions.filter { tracked ->
                     val date = tracked.record.localDate()
                     !date.isBefore(weekStart) && !date.isAfter(weekStart.plusDays(6))
                 }
@@ -396,7 +369,7 @@ class DashboardViewModel : ViewModel() {
                 val weekCount = ceil(month.lengthOfMonth() / 7.0).toInt()
                 val labels = (1..weekCount).map { "W$it" }
                 val totals = labels.associateWith { 0 }.toMutableMap()
-                val filtered = transactions.filter { tracked ->
+                val filtered = filteredTransactions.filter { tracked ->
                     YearMonth.from(tracked.record.localDate()) == month
                 }
                 filtered.forEach { tracked ->
@@ -413,7 +386,7 @@ class DashboardViewModel : ViewModel() {
             TrackingStartOption.YEARLY -> {
                 val monthLabels = (1..now.monthValue).map { YearMonth.of(now.year, it) }
                 val totals = monthLabels.associateWith { 0 }.toMutableMap()
-                val filtered = transactions.filter { tracked ->
+                val filtered = filteredTransactions.filter { tracked ->
                     tracked.record.localDate().year == now.year
                 }
                 filtered.forEach { tracked ->
@@ -533,14 +506,19 @@ class DashboardViewModel : ViewModel() {
 
     private fun mapRecentTransaction(transaction: TrackedTransaction): RecentTransactionUiModel {
         val date = Instant.ofEpochMilli(transaction.record.timestampMillis).atZone(zoneId)
+        val merchantTitle = transaction.record.merchant?.takeIf { it.isNotBlank() }
         return RecentTransactionUiModel(
             id = "${transaction.sourceType.name}-${transaction.record.timestampMillis}-${transaction.record.amount}",
-            title = if (transaction.record.category.equals("Others", ignoreCase = true)) {
-                "Recent payment"
+            title = if (merchantTitle != null) {
+                merchantTitle
             } else {
-                "${transaction.record.category} expense"
+                when (transaction.record.kind) {
+                    TransactionKind.INCOME -> "${transaction.record.category} credit"
+                    TransactionKind.REFUND -> "${transaction.record.category} refund"
+                    else -> "${transaction.record.category} expense"
+                }
             },
-            subtitle = sourceLabel(transaction.sourceType),
+            subtitle = buildSubtitle(transaction),
             amount = transaction.record.amount,
             dateLabel = date.format(DateTimeFormatter.ofPattern("dd MMM, hh:mm a")),
             sourceLabel = sourceLabel(transaction.sourceType)
@@ -556,7 +534,38 @@ class DashboardViewModel : ViewModel() {
     }
 
     private fun allTransactions(): List<TrackedTransaction> {
-        return latestSmsTransactions + latestEmailTransactions
+        return dedupeTransactions(latestSmsTransactions + latestEmailTransactions)
+    }
+
+    private fun preferredTransactions(transactions: List<TrackedTransaction>): List<TrackedTransaction> {
+        return transactions.filter {
+            it.record.confidence >= 0.55f &&
+                (it.record.kind == TransactionKind.EXPENSE || it.record.kind == TransactionKind.REFUND)
+        }
+    }
+
+    private fun dedupeTransactions(transactions: List<TrackedTransaction>): List<TrackedTransaction> {
+        return transactions
+            .sortedByDescending { it.record.confidence }
+            .distinctBy { tracked ->
+                val minuteBucket = tracked.record.timestampMillis / 60000L
+                listOf(
+                    tracked.record.amount.toString(),
+                    tracked.record.referenceId ?: "",
+                    tracked.record.merchant?.lowercase() ?: "",
+                    tracked.record.kind.name,
+                    minuteBucket.toString()
+                ).joinToString("|")
+            }
+    }
+
+    private fun buildSubtitle(transaction: TrackedTransaction): String {
+        val confidence = (transaction.record.confidence * 100).toInt()
+        return listOfNotNull(
+            sourceLabel(transaction.sourceType),
+            transaction.record.category.takeIf { it.isNotBlank() },
+            "$confidence% match"
+        ).joinToString(" | ")
     }
 
     private fun trackingProgress(hasConnectedSources: Boolean, option: TrackingStartOption): Float {
